@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
-	"net"
-	"net/url"
+	"log"
 	"os"
 	"time"
 
 	"github.com/shogo82148/yaraus"
-	"gopkg.in/redis.v5"
 )
 
 func main() {
@@ -28,18 +26,12 @@ func main() {
 	flag.BoolVar(&stats, "stats", false, "show stats")
 	flag.Parse()
 
-	u, err := url.Parse(server)
+	opt, ns, err := yaraus.ParseURI(server)
 	if err != nil {
-		os.Exit(1)
+		log.Fatal(err)
 	}
-	hostname := u.Hostname()
-	port := u.Port()
-	if port == "" {
-		port = "6379"
-	}
-	y := yaraus.New(&redis.Options{
-		Addr: net.JoinHostPort(hostname, port),
-	}, u.Query().Get("ns"), min, max)
+	y := yaraus.New(opt, ns, min, max)
+
 	y.Interval = interval
 	y.Expire = expire
 
