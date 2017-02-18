@@ -50,11 +50,11 @@ func (id yarausID) String() string {
 // Stats is statistics information.
 type Stats struct {
 	SuppliedCount int64   `json:"supplied_count"`
-	UnusedIDs     int64   `json:"unused_ids"`
-	UsedIDs       int64   `json:"used_ids"`
-	UsedTTLMax    float64 `json:"used_ttl_max"`
-	UsedTTLMid    float64 `json:"used_ttl_mid"`
-	UsedTTLMin    float64 `json:"used_ttl_min"`
+	UnusingIDs    int64   `json:"unusing_ids"`
+	UsingIDs      int64   `json:"using_ids"`
+	UsingTTLMax   float64 `json:"using_ttl_max"`
+	UsingTTLMid   float64 `json:"using_ttl_mid"`
+	UsingTTLMin   float64 `json:"using_ttl_min"`
 }
 
 // Yaraus is Yet Another Ranged Unique id Supplier
@@ -378,35 +378,35 @@ func (y *Yaraus) Stats() (Stats, error) {
 	epoch := timeToNumber(now)
 	pipeline := y.c.TxPipeline()
 	count := pipeline.Get(y.keyNextID())
-	unused := pipeline.ZCount(y.keyIDs(), "-inf", "("+epoch)
-	used := pipeline.ZCount(y.keyIDs(), epoch, "+inf")
+	unusing := pipeline.ZCount(y.keyIDs(), "-inf", "("+epoch)
+	using := pipeline.ZCount(y.keyIDs(), epoch, "+inf")
 	_, err := pipeline.Exec()
 	if err != nil {
 		return Stats{}, err
 	}
 	stats.SuppliedCount, _ = strconv.ParseInt(count.Val(), 10, 64)
-	stats.UnusedIDs = unused.Val()
-	stats.UsedIDs = used.Val()
+	stats.UnusingIDs = unusing.Val()
+	stats.UsingIDs = using.Val()
 
 	// get ttl of the using ids
-	if used.Val() > 0 {
+	if using.Val() > 0 {
 		epoch := timeToFloat64(now)
 		pipeline := y.c.TxPipeline()
 		min := pipeline.ZRangeWithScores(y.keyIDs(), -1, -1)
-		mid := pipeline.ZRangeWithScores(y.keyIDs(), -(stats.UsedIDs+1)/2, -(stats.UsedIDs+1)/2)
-		max := pipeline.ZRangeWithScores(y.keyIDs(), -stats.UsedIDs, -stats.UsedIDs)
+		mid := pipeline.ZRangeWithScores(y.keyIDs(), -(stats.UsingIDs+1)/2, -(stats.UsingIDs+1)/2)
+		max := pipeline.ZRangeWithScores(y.keyIDs(), -stats.UsingIDs, -stats.UsingIDs)
 		_, err := pipeline.Exec()
 		if err != nil {
 			return Stats{}, err
 		}
 		if len(max.Val()) >= 1 {
-			stats.UsedTTLMax = max.Val()[0].Score - epoch
+			stats.UsingTTLMax = max.Val()[0].Score - epoch
 		}
 		if len(mid.Val()) >= 1 {
-			stats.UsedTTLMid = mid.Val()[0].Score - epoch
+			stats.UsingTTLMid = mid.Val()[0].Score - epoch
 		}
 		if len(min.Val()) >= 1 {
-			stats.UsedTTLMin = min.Val()[0].Score - epoch
+			stats.UsingTTLMin = min.Val()[0].Score - epoch
 		}
 	}
 
