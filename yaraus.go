@@ -48,6 +48,9 @@ type Yaraus struct {
 	expireAt time.Time
 	mu       sync.RWMutex
 
+	scriptGet       *redis.Script
+	scriptExtendTTL *redis.Script
+
 	min, max  uint
 	namespace string
 	Expire    time.Duration
@@ -114,8 +117,8 @@ func (y *Yaraus) Get(d time.Duration) error {
 		return err
 	}
 
-	ret, err := y.c.Eval(
-		`
+	if y.scriptGet == nil {
+		y.scriptGet = redis.NewScript(`
 local key_ids = KEYS[1]
 local key_clients = KEYS[2]
 local min = tonumber(ARGV[1])
@@ -146,7 +149,11 @@ worker_exp = time + expire
 redis.call("ZADD", key_ids, worker_exp, worker_id)
 redis.call("HSET", key_clients, worker_id, generator_id)
 return {worker_id, tostring(worker_exp)}
-`,
+`)
+	}
+
+	ret, err := y.scriptGet.Run(
+		y.c,
 		[]string{
 			y.keyIDs(),
 			y.keyClients(),
@@ -176,8 +183,8 @@ func (y *Yaraus) ExtendTTL(d time.Duration) error {
 	y.mu.Lock()
 	defer y.mu.Unlock()
 
-	ret, err := y.c.Eval(
-		`
+	if y.scriptExtendTTL == nil {
+		y.scriptExtendTTL = redis.NewScript(`
 local key_ids = KEYS[1]
 local key_clients = KEYS[2]
 local generator_id = ARGV[1]
@@ -195,7 +202,11 @@ end
 local worker_exp = time + expire
 redis.call("ZADD", key_ids, worker_exp, worker_id)
 return {worker_id, tostring(worker_exp)}
-`,
+`)
+	}
+
+	ret, err := y.scriptExtendTTL.Run(
+		y.c,
 		[]string{
 			y.keyIDs(),
 			y.keyClients(),
