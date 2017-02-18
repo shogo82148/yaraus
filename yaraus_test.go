@@ -131,3 +131,54 @@ func TestExtendTTL(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestExtendTTLError(t *testing.T) {
+	s, err := redistest.NewServer(true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var min, max uint = 1, 1023
+	g := New(&redis.Options{
+		Network: "unix",
+		Addr:    s.Config["unixsocket"],
+	}, "yaraus", min, max)
+	g.Get(10 * time.Second)
+
+	s.Stop() // STOP!
+	err = g.ExtendTTL(10 * time.Second)
+
+	// we can use the id until it expires.
+	err2, ok := err.(InvalidID)
+	if ok && err2.InvalidID() {
+		t.Errorf("want not invalid id error, got %v", t)
+	}
+}
+
+func TestExtendTTLInvaidID(t *testing.T) {
+	s, err := redistest.NewServer(true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Stop()
+
+	var min, max uint = 1, 1023
+	g := New(&redis.Options{
+		Network: "unix",
+		Addr:    s.Config["unixsocket"],
+	}, "yaraus", min, max)
+	g.Get(10 * time.Second)
+
+	// I AM A DATABASE REMOVABLE SPECIALIST!!
+	if err := g.c.FlushAll().Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	err = g.ExtendTTL(10 * time.Second)
+
+	// we must invalidate the id for avoiding duplicate
+	err2, ok := err.(InvalidID)
+	if !ok || !err2.InvalidID() {
+		t.Errorf("want invalid id error, got %v", t)
+	}
+}

@@ -2,10 +2,12 @@ package yaraus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,8 +22,14 @@ var DisableSafeguard bool
 type yarausID uint
 
 func parseYarausID(s string) (yarausID, error) {
-	len := s[0] - 'A' + 1
-	s = s[1 : len+1]
+	if len(s) == 0 {
+		return 0, errors.New("yaraus: id is empty")
+	}
+	l := int(s[0] - 'A' + 1)
+	if len(s) <= l {
+		return 0, fmt.Errorf("yaraus: id is too short %s", s)
+	}
+	s = s[1 : l+1]
 	id, err := strconv.ParseUint(s, 10, 64)
 	if err != nil {
 		return 0, err
@@ -176,7 +184,11 @@ return {worker_id, tostring(worker_exp)}
 	iret := ret.([]interface{})
 	workerID, err := parseYarausID(iret[0].(string))
 	if err != nil {
-		return err
+		return &Error{
+			Err:         err.Error(),
+			ClientID:    y.clientID,
+			IsInvalidID: true,
+		}
 	}
 	y.id = workerID
 	y.expireAt = numberToTime(iret[1].(string))
@@ -201,7 +213,7 @@ local expire = tonumber(ARGV[4])
 -- check ownership
 local owner = redis.call("HGET", key_clients, worker_id)
 if owner ~= generator_id then
-    return {err="invalid generator id"}
+    return {err="` + invalidErrorSentinel + `"}
 end
 
 -- extend expire time
@@ -223,14 +235,23 @@ return {worker_id, tostring(worker_exp)}
 		durationToNumber(d),
 	).Result()
 	if err != nil {
-		return err
+		return &Error{
+			Err:         err.Error(),
+			ClientID:    y.clientID,
+			ID:          uint(y.id),
+			IsInvalidID: strings.Index(err.Error(), invalidErrorSentinel) >= 0,
+		}
 	}
 	iret := ret.([]interface{})
-	workerID, err := parseYarausID(iret[0].(string))
+	id, err := parseYarausID(iret[0].(string))
 	if err != nil {
-		return err
+		return &Error{
+			Err:         err.Error(),
+			ClientID:    y.clientID,
+			IsInvalidID: true,
+		}
 	}
-	y.id = workerID
+	y.id = id
 	y.expireAt = numberToTime(iret[1].(string))
 
 	return nil
@@ -321,6 +342,10 @@ func (y *Yaraus) Run(ctx context.Context, r Runner) error {
 			err := y.ExtendTTL(y.Expire)
 			if err != nil {
 				log.Printf("error: %v", err)
+				if err, ok := err.(InvalidID); ok && err.InvalidID() {
+					cancel()
+					return
+				}
 				continue
 			}
 			select {
