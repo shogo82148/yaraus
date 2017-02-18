@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
+	"syscall"
 	"time"
 
 	"github.com/shogo82148/yaraus"
@@ -85,6 +87,11 @@ func commandRun(args []string) int {
 	runner := yaraus.NewCommandRunner(replacement, flags.Args())
 	err = y.Run(context.Background(), runner)
 	if err != nil {
+		if e, ok := err.(*exec.ExitError); ok {
+			if s, ok := e.Sys().(syscall.WaitStatus); ok {
+				return s.ExitStatus()
+			}
+		}
 		log.Println(err)
 		return 1
 	}

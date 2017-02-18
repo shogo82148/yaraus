@@ -5,7 +5,17 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
+	"syscall"
 )
+
+// TrapSignals are trap signals while CommandRunner.Run
+var TrapSignals = []os.Signal{
+	syscall.SIGHUP,
+	syscall.SIGINT,
+	syscall.SIGTERM,
+	syscall.SIGQUIT,
+}
 
 // Runner is a runner.
 type Runner interface {
@@ -48,9 +58,22 @@ func (r *CommandRunner) Run(ctx context.Context, id uint) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	err := cmd.Start()
+	if err != nil {
+		return err
+	}
 
-	// TODO: forward signals to child
-	// TODO: get exit code
+	// forward signals to child
+	go func() {
+		signalCh := make(chan os.Signal, 1)
+		signal.Notify(signalCh, TrapSignals...)
+		for {
+			select {
+			case s := <-signalCh:
+				cmd.Process.Signal(s)
+			}
+		}
+	}()
 
-	return cmd.Run()
+	return cmd.Wait()
 }
