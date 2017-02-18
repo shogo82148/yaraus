@@ -12,6 +12,10 @@ import (
 	redis "gopkg.in/redis.v5"
 )
 
+// DisableSafeguard disables safe options.
+// Use this only if you are a database removable specialist.
+var DisableSafeguard bool
+
 // dictionary sortable integer id
 type yarausID uint
 
@@ -53,8 +57,9 @@ type Yaraus struct {
 
 	min, max  uint
 	namespace string
-	Expire    time.Duration
 	Interval  time.Duration
+	Delay     time.Duration
+	Expire    time.Duration
 }
 
 // New returns new yaraus client.
@@ -64,8 +69,9 @@ func New(redisOptions *redis.Options, namespace string, min, max uint) *Yaraus {
 		min:       min,
 		max:       max,
 		namespace: namespace,
+		Interval:  1 * time.Second,
+		Delay:     2 * time.Second,
 		Expire:    3 * time.Second,
-		Interval:  time.Second,
 	}
 }
 
@@ -235,8 +241,31 @@ func (y *Yaraus) Release() error {
 	return y.ExtendTTL(0)
 }
 
+func (y *Yaraus) checkSettings() {
+	if !DisableSafeguard {
+		var min, max time.Duration
+		min = time.Second
+		if y.Expire < min {
+			log.Printf("WARNING: expire duration %s is too short. I use %s instead of it.", y.Expire, min)
+			y.Expire = min
+		}
+		max = y.Expire / 2
+		if y.Interval > max {
+			log.Printf("WARNING: interval duration %s is too long. I use %s instead of it.", y.Interval, max)
+			y.Interval = max
+		}
+		min = y.Interval * 2
+		if y.Delay < min {
+			log.Printf("WARNING: interval duration %s is too short. I use %s instead of it.", y.Delay, min)
+			y.Delay = min
+		}
+	}
+}
+
 // Run runs the runner r.
 func (y *Yaraus) Run(ctx context.Context, r Runner) error {
+	y.checkSettings()
+
 	for {
 		log.Println("getting new id...")
 		err := y.Get(y.Expire)
@@ -301,12 +330,11 @@ func (y *Yaraus) Run(ctx context.Context, r Runner) error {
 		}
 	}()
 
-	log.Println("sleep a little for making sure that other generates which has same id expire.")
-	d := 2 * y.Interval
-	if y.Expire < d {
-		d = y.Expire
+	d := y.Delay
+	if d > 0 {
+		log.Printf("sleep %s for making sure that other generates which has same id expire.", d)
+		time.Sleep(d)
 	}
-	time.Sleep(d)
 
 	log.Println("starting...")
 	return r.Run(ctx, y.ID())
