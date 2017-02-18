@@ -8,7 +8,7 @@ import (
 	"gopkg.in/redis.v5"
 )
 
-func TestWorkerID(t *testing.T) {
+func TestID(t *testing.T) {
 	cases := []struct {
 		id   yarausID
 		want string
@@ -46,6 +46,23 @@ func TestWorkerID(t *testing.T) {
 		}
 		if yarausID(i) != c.id {
 			t.Errorf("%d: got %s, want %s", got, yarausID(i), c.id)
+		}
+	}
+}
+
+func TestID_error(t *testing.T) {
+	cases := []string{
+		"",   // empty
+		"@",  // 'A' - 1
+		"[",  // 'Z' + 1
+		"A",  // missing number
+		"AB", // 'B' is not number
+		"T18446744073709551616", // max(uint64) + 1
+	}
+	for _, s := range cases {
+		_, err := parseYarausID(s)
+		if err == nil {
+			t.Errorf("parseYarausID(%s) want error, got nil", s)
 		}
 	}
 }

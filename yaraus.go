@@ -25,6 +25,9 @@ func parseYarausID(s string) (yarausID, error) {
 	if len(s) == 0 {
 		return 0, errors.New("yaraus: id is empty")
 	}
+	if s[0] < 'A' || 'Z' < s[0] {
+		return 0, errors.New("yaraus: id is invalid")
+	}
 	l := int(s[0] - 'A' + 1)
 	if len(s) <= l {
 		return 0, fmt.Errorf("yaraus: id is too short %s", s)
