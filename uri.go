@@ -14,6 +14,9 @@ import (
 const (
 	// DefaultNamespace is default namespace.
 	DefaultNamespace = "yaraus"
+
+	// DefaultURI is default uri.
+	DefaultURI = "redis://localhost:6379/0?ns=" + DefaultNamespace
 )
 
 // ParseURI parses an uri for redis.

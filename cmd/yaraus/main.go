@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -12,25 +13,65 @@ import (
 )
 
 func main() {
+	flag.Parse()
+	args := flag.Args()
+	if len(args) < 1 {
+		usage()
+		return
+	}
+
+	var exitCode int
+	cmd := args[0]
+	switch cmd {
+	case "run":
+		exitCode = commandRun(args)
+	case "stats":
+		exitCode = commandStats(args)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
+		usage()
+		exitCode = 2
+	}
+
+	os.Exit(exitCode)
+}
+
+func usage() {
+	fmt.Fprint(os.Stderr, `yaraus is Yet Another Ranged Unique id Supplier
+
+Usage:
+	yaraus command [arguments]
+
+The commands are:
+
+	run
+	stats
+`)
+}
+
+func commandRun(args []string) int {
 	var replacement string
 	var interval, delay, expire time.Duration
 	var server string
 	var min, max uint
 	var stats bool
-	flag.StringVar(&replacement, "replacement", "worker-id", "replacement text for worker id")
-	flag.DurationVar(&interval, "interval", time.Second, "interval duration time")
-	flag.DurationVar(&delay, "delay", 2*time.Second, "delay duration time for get id and use it")
-	flag.DurationVar(&expire, "expire", 3*time.Second, "expire duration time")
-	flag.StringVar(&server, "server", "redis://localhost:6379/?ns=yaraus", "url for redis")
-	flag.BoolVar(&yaraus.DisableSafeguard, "i-am-a-database-removable-specialist", false, "disables safe options")
-	flag.UintVar(&min, "min", 1, "minimam worker id")
-	flag.UintVar(&max, "max", 1023, "maximam worker id")
-	flag.BoolVar(&stats, "stats", false, "show stats")
-	flag.Parse()
+
+	flags := flag.NewFlagSet("run", flag.ExitOnError)
+	flags.StringVar(&replacement, "replacement", "worker-id", "replacement text for worker id")
+	flags.DurationVar(&interval, "interval", time.Second, "interval duration time")
+	flags.DurationVar(&delay, "delay", 2*time.Second, "delay duration time for get id and use it")
+	flags.DurationVar(&expire, "expire", 3*time.Second, "expire duration time")
+	flags.StringVar(&server, "server", yaraus.DefaultURI, "url for redis")
+	flags.BoolVar(&yaraus.DisableSafeguard, "i-am-a-database-removable-specialist", false, "disables safe options")
+	flags.UintVar(&min, "min", 1, "minimam worker id")
+	flags.UintVar(&max, "max", 1023, "maximam worker id")
+	flags.BoolVar(&stats, "stats", false, "show stats")
+	flags.Parse(args[1:])
 
 	opt, ns, err := yaraus.ParseURI(server)
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		return 1
 	}
 	y := yaraus.New(opt, ns, min, max)
 
@@ -41,17 +82,39 @@ func main() {
 	y.Delay = delay
 	y.Expire = expire
 
-	if stats {
-		s, err := y.Stats()
-		if err != nil {
-			return
-		}
-		b, _ := json.MarshalIndent(s, "", "    ")
-		os.Stdout.Write(b)
-		return
+	runner := yaraus.NewCommandRunner(replacement, flags.Args())
+	err = y.Run(context.Background(), runner)
+	if err != nil {
+		log.Println(err)
+		return 1
+	}
+	return 0
+}
+
+func commandStats(args []string) int {
+	var server string
+	flags := flag.NewFlagSet("stats", flag.ExitOnError)
+	flags.StringVar(&server, "server", yaraus.DefaultURI, "url for redis")
+	flags.Parse(args[1:])
+
+	opt, ns, err := yaraus.ParseURI(server)
+	if err != nil {
+		log.Println(err)
+		return 1
 	}
 
-	runner := yaraus.NewCommandRunner(replacement, flag.Args())
+	y := yaraus.New(opt, ns, 1, 1)
+	s, err := y.Stats()
+	if err != nil {
+		log.Println(err)
+		return 1
+	}
+	b, err := json.MarshalIndent(s, "", "    ")
+	if err != nil {
+		log.Println(err)
+		return 1
+	}
+	os.Stdout.Write(b)
 
-	y.Run(context.Background(), runner)
+	return 0
 }
