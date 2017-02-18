@@ -49,9 +49,12 @@ func (id yarausID) String() string {
 
 // Stats is statistics information.
 type Stats struct {
-	SuppliedCount int64 `json:"supplied_count"`
-	UnusedIDs     int64 `json:"unused_ids"`
-	UsedIDs       int64 `json:"used_ids"`
+	SuppliedCount int64   `json:"supplied_count"`
+	UnusedIDs     int64   `json:"unused_ids"`
+	UsedIDs       int64   `json:"used_ids"`
+	UsedTTLMax    float64 `json:"used_ttl_max"`
+	UsedTTLMid    float64 `json:"used_ttl_mid"`
+	UsedTTLMin    float64 `json:"used_ttl_min"`
 }
 
 // Yaraus is Yet Another Ranged Unique id Supplier
@@ -370,22 +373,44 @@ func (y *Yaraus) Run(ctx context.Context, r Runner) error {
 
 // Stats returns statistics information.
 func (y *Yaraus) Stats() (Stats, error) {
-	now := timeToNumber(time.Now())
+	var stats Stats
+	now := time.Now()
+	epoch := timeToNumber(now)
 	pipeline := y.c.TxPipeline()
 	count := pipeline.Get(y.keyNextID())
-	unused := pipeline.ZCount(y.keyIDs(), "-inf", "("+now)
-	used := pipeline.ZCount(y.keyIDs(), now, "+inf")
+	unused := pipeline.ZCount(y.keyIDs(), "-inf", "("+epoch)
+	used := pipeline.ZCount(y.keyIDs(), epoch, "+inf")
 	_, err := pipeline.Exec()
 	if err != nil {
 		return Stats{}, err
 	}
-	c, _ := strconv.ParseInt(count.Val(), 10, 64)
+	stats.SuppliedCount, _ = strconv.ParseInt(count.Val(), 10, 64)
+	stats.UnusedIDs = unused.Val()
+	stats.UsedIDs = used.Val()
 
-	return Stats{
-		SuppliedCount: c,
-		UnusedIDs:     unused.Val(),
-		UsedIDs:       used.Val(),
-	}, nil
+	// get ttl of the using ids
+	if used.Val() > 0 {
+		epoch := timeToFloat64(now)
+		pipeline := y.c.TxPipeline()
+		min := pipeline.ZRangeWithScores(y.keyIDs(), -1, -1)
+		mid := pipeline.ZRangeWithScores(y.keyIDs(), -(stats.UsedIDs+1)/2, -(stats.UsedIDs+1)/2)
+		max := pipeline.ZRangeWithScores(y.keyIDs(), -stats.UsedIDs, -stats.UsedIDs)
+		_, err := pipeline.Exec()
+		if err != nil {
+			return Stats{}, err
+		}
+		if len(max.Val()) >= 1 {
+			stats.UsedTTLMax = max.Val()[0].Score - epoch
+		}
+		if len(mid.Val()) >= 1 {
+			stats.UsedTTLMid = mid.Val()[0].Score - epoch
+		}
+		if len(min.Val()) >= 1 {
+			stats.UsedTTLMin = min.Val()[0].Score - epoch
+		}
+	}
+
+	return stats, nil
 }
 
 func (y *Yaraus) keyNextID() string {

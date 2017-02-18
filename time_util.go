@@ -7,12 +7,17 @@ import (
 	"time"
 )
 
-// time2Number converts time.Time to lua number
+// time2Number converts time.Time to lua number(unix epoch time).
 func timeToNumber(t time.Time) string {
 	return fmt.Sprintf("%d.%09d", t.Unix(), t.Nanosecond())
 }
 
-// numberToTime converts lua number to time.Time
+// time2Float64 converts time.Time to float64(unix epoch time)
+func timeToFloat64(t time.Time) float64 {
+	return float64(t.Unix()) + float64(t.Nanosecond())/1e9
+}
+
+// numberToTime converts lua number(unix epoch time) to time.Time
 func numberToTime(s string) time.Time {
 	timestamp, err := strconv.ParseFloat(s, 64)
 	if err != nil {
