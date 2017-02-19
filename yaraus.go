@@ -49,13 +49,52 @@ func (id yarausID) String() string {
 
 // Stats is statistics information.
 type Stats struct {
-	SuppliedCount int64   `json:"supplied_count"`
-	UnusingIDs    int64   `json:"unusing_ids"`
-	UsingIDs      int64   `json:"using_ids"`
-	UsingTTLMax   float64 `json:"using_ttl_max"`
-	UsingTTLMid   float64 `json:"using_ttl_mid"`
-	UsingTTLMin   float64 `json:"using_ttl_min"`
+	ClientIDCount           int64   `json:"client_id_count"`
+	GetIDCount              int64   `json:"client_get_id_count"`
+	GetIDSuccess            int64   `json:"client_get_id_success"`
+	GetIDNoAvailableID      int64   `json:"get_id_no_available_id"`
+	ExtendTTLCount          int64   `json:"extend_ttl_count"`
+	ExtendTTLSuccess        int64   `json:"extend_ttl_success"`
+	ExtendTTLOwnershipError int64   `json:"extend_ttl_ownership_error"`
+	ExtendTTLExpireWarning  int64   `json:"extend_ttl_expire_warning"`
+	UnusingIDs              int64   `json:"unusing_ids"`
+	UsingIDs                int64   `json:"using_ids"`
+	UsingTTLMax             float64 `json:"using_ttl_max"`
+	UsingTTLMid             float64 `json:"using_ttl_mid"`
+	UsingTTLMin             float64 `json:"using_ttl_min"`
 }
+
+const (
+	// Total number of client IDs generated
+	statsClientIDCount = "client_id_count"
+
+	// Total number of GetID called
+	statsGetIDCount = "get_id_count"
+
+	// Total number of GetID succeeded
+	statsGetIDSuccess = "get_id_success"
+
+	// Total number of GetID error
+	statsGetIDNoAvailableID = "get_id_no_available_id"
+
+	// Total number of ExtendTTL called
+	statsExtendTTLCount = "extend_ttl_count"
+
+	// Total number of ExtendTTL succeeded
+	statsExtendTTLSuccess = "extend_ttl_success"
+
+	// Total number of ExtendTTL ownership check failed
+	statsExtendTTLOwnershipError = "extend_ttl_ownership_error"
+
+	// Total number of ExtendTTL expire check failed
+	statsExtendTTLExpireWarning = "extend_ttl_expire_warning"
+
+	// max value of id
+	statsMax = "max"
+
+	// min value of id
+	statsMin = "min"
+)
 
 // Yaraus is Yet Another Ranged Unique id Supplier
 type Yaraus struct {
@@ -68,6 +107,7 @@ type Yaraus struct {
 
 	scriptGet       *redis.Script
 	scriptExtendTTL *redis.Script
+	scriptRelease   *redis.Script
 
 	min, max  uint
 	namespace string
@@ -117,7 +157,7 @@ func (y *Yaraus) getClientID() error {
 		return err
 	}
 
-	id, err := y.c.Incr(y.keyNextID()).Result()
+	id, err := y.c.HIncrBy(y.keyStats(), statsClientIDCount, 1).Result()
 	if err != nil {
 		return err
 	}
@@ -141,8 +181,7 @@ func (y *Yaraus) Get(d time.Duration) error {
 		y.scriptGet = redis.NewScript(`
 local key_ids = KEYS[1]
 local key_clients = KEYS[2]
-local key_min = KEYS[3]
-local key_max = KEYS[4]
+local key_stats = KEYS[3]
 local min = tonumber(ARGV[1])
 local max = tonumber(ARGV[2])
 local generator_id = ARGV[3]
@@ -156,15 +195,16 @@ if redis.call("EXISTS", key_ids) == 0 then
         s = string.char(string.len(s)-1+string.byte('A')) .. s
         redis.call("ZADD", key_ids, 0, s)
     end
-	redis.call("SET", key_min, min)
-	redis.call("SET", key_max, max)
+	redis.call("HMSET", key_stats, "` + statsMin + `", min, "` + statsMax + `", max)
 end
 
 -- search available id
+redis.call("HINCRBY", key_stats, "` + statsGetIDCount + `", 1)
 local ret = redis.call("ZRANGE", key_ids, 0, 0, "WITHSCORES")
 local worker_id = ret[1]
 local worker_exp = tonumber(ret[2])
 if worker_exp >= time then
+    redis.call("HINCRBY", key_stats, "` + statsGetIDNoAvailableID + `", 1)
     return {err="no available id"}
 end
 
@@ -172,6 +212,7 @@ end
 worker_exp = time + expire
 redis.call("ZADD", key_ids, worker_exp, worker_id)
 redis.call("HSET", key_clients, worker_id, generator_id)
+redis.call("HINCRBY", key_stats, "` + statsGetIDSuccess + `", 1)
 return {worker_id, tostring(worker_exp)}
 `)
 	}
@@ -181,8 +222,7 @@ return {worker_id, tostring(worker_exp)}
 		[]string{
 			y.keyIDs(),
 			y.keyClients(),
-			y.keyMin(),
-			y.keyMax(),
+			y.keyStats(),
 		},
 		y.min,
 		y.max,
@@ -217,20 +257,30 @@ func (y *Yaraus) ExtendTTL(d time.Duration) error {
 		y.scriptExtendTTL = redis.NewScript(`
 local key_ids = KEYS[1]
 local key_clients = KEYS[2]
+local key_stats = KEYS[3]
 local generator_id = ARGV[1]
 local worker_id = ARGV[2]
 local time = tonumber(ARGV[3])
 local expire = tonumber(ARGV[4])
+redis.call("HINCRBY", key_stats, "` + statsExtendTTLCount + `", 1)
 
 -- check ownership
 local owner = redis.call("HGET", key_clients, worker_id)
 if owner ~= generator_id then
+    redis.call("HINCRBY", key_stats, "` + statsExtendTTLOwnershipError + `", 1)
     return {err="` + invalidErrorSentinel + `"}
+end
+
+-- check expire
+local score = redis.call("ZSCORE", key_ids, worker_id)
+if score == false or tonumber(score) < time then
+    redis.call("HINCRBY", key_stats, "` + statsExtendTTLExpireWarning + `", 1)
 end
 
 -- extend expire time
 local worker_exp = time + expire
 redis.call("ZADD", key_ids, worker_exp, worker_id)
+redis.call("HINCRBY", key_stats, "` + statsExtendTTLSuccess + `", 1)
 return {worker_id, tostring(worker_exp)}
 `)
 	}
@@ -240,11 +290,72 @@ return {worker_id, tostring(worker_exp)}
 		[]string{
 			y.keyIDs(),
 			y.keyClients(),
+			y.keyStats(),
 		},
 		y.clientID,
 		y.id.String(),
 		timeToNumber(time.Now()),
 		durationToNumber(d),
+	).Result()
+	if err != nil {
+		invalidID := strings.Index(err.Error(), invalidErrorSentinel) >= 0
+		if invalidID {
+			y.id = 0
+		}
+		return &Error{
+			Err:         err.Error(),
+			ClientID:    y.clientID,
+			ID:          uint(y.id),
+			IsInvalidID: invalidID,
+		}
+	}
+	iret := ret.([]interface{})
+	id, err := parseYarausID(iret[0].(string))
+	if err != nil {
+		y.id = id
+		return &Error{
+			Err:         err.Error(),
+			ClientID:    y.clientID,
+			IsInvalidID: true,
+		}
+	}
+	y.id = id
+	y.expireAt = numberToTime(iret[1].(string))
+
+	return nil
+}
+
+// Release releases worker id.
+func (y *Yaraus) Release() error {
+	y.mu.Lock()
+	defer y.mu.Unlock()
+
+	if y.scriptRelease == nil {
+		y.scriptRelease = redis.NewScript(`
+local key_ids = KEYS[1]
+local key_clients = KEYS[2]
+local yaraus_id = ARGV[1]
+local id = ARGV[2]
+local time = tonumber(ARGV[3])
+
+local owner = redis.call("HGET", key_clients, yaraus_id)
+if owner == yaraus_id then
+    redis.call("ZADD", key_ids, time, id)
+end
+
+return {id, tostring(time)}
+`)
+	}
+
+	ret, err := y.scriptRelease.Run(
+		y.c,
+		[]string{
+			y.keyIDs(),
+			y.keyClients(),
+		},
+		y.clientID,
+		y.id.String(),
+		timeToNumber(time.Now()),
 	).Result()
 	if err != nil {
 		return &Error{
@@ -267,11 +378,6 @@ return {worker_id, tostring(worker_exp)}
 	y.expireAt = numberToTime(iret[1].(string))
 
 	return nil
-}
-
-// Release releases worker id.
-func (y *Yaraus) Release() error {
-	return y.ExtendTTL(0)
 }
 
 func (y *Yaraus) checkSettings() {
@@ -311,7 +417,10 @@ func (y *Yaraus) Run(ctx context.Context, r Runner) error {
 	}
 	defer func() {
 		log.Println("releasing id...")
-		y.Release()
+		err := y.Release()
+		if err != nil {
+			log.Println("release error", err)
+		}
 	}()
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -383,14 +492,22 @@ func (y *Yaraus) Stats() (Stats, error) {
 	now := time.Now()
 	epoch := timeToNumber(now)
 	pipeline := y.c.TxPipeline()
-	count := pipeline.Get(y.keyNextID())
+	retStats := pipeline.HGetAll(y.keyStats())
 	unusing := pipeline.ZCount(y.keyIDs(), "-inf", "("+epoch)
 	using := pipeline.ZCount(y.keyIDs(), epoch, "+inf")
 	_, err := pipeline.Exec()
 	if err != nil {
 		return Stats{}, err
 	}
-	stats.SuppliedCount, _ = strconv.ParseInt(count.Val(), 10, 64)
+	val := retStats.Val()
+	stats.ClientIDCount, _ = strconv.ParseInt(val[statsClientIDCount], 10, 64)
+	stats.GetIDCount, _ = strconv.ParseInt(val[statsGetIDCount], 10, 64)
+	stats.GetIDSuccess, _ = strconv.ParseInt(val[statsGetIDSuccess], 10, 64)
+	stats.GetIDNoAvailableID, _ = strconv.ParseInt(val[statsGetIDNoAvailableID], 10, 64)
+	stats.ExtendTTLCount, _ = strconv.ParseInt(val[statsExtendTTLCount], 10, 64)
+	stats.ExtendTTLSuccess, _ = strconv.ParseInt(val[statsExtendTTLSuccess], 10, 64)
+	stats.ExtendTTLOwnershipError, _ = strconv.ParseInt(val[statsExtendTTLOwnershipError], 10, 64)
+	stats.ExtendTTLExpireWarning, _ = strconv.ParseInt(val[statsExtendTTLExpireWarning], 10, 64)
 	stats.UnusingIDs = unusing.Val()
 	stats.UsingIDs = using.Val()
 
@@ -432,8 +549,8 @@ type ClientInfo struct {
 func (y *Yaraus) List() ([]ClientInfo, error) {
 	// get min and max fron redis
 	pipeline := y.c.TxPipeline()
-	retMin := pipeline.Get(y.keyMin())
-	retMax := pipeline.Get(y.keyMax())
+	retMin := pipeline.HGet(y.keyStats(), statsMin)
+	retMax := pipeline.HGet(y.keyStats(), statsMax)
 	_, err := pipeline.Exec()
 	if err != nil {
 		return nil, err
@@ -475,10 +592,6 @@ func (y *Yaraus) List() ([]ClientInfo, error) {
 	return clients, nil
 }
 
-func (y *Yaraus) keyNextID() string {
-	return y.namespace + ":next_id"
-}
-
 func (y *Yaraus) keyIDs() string {
 	return y.namespace + ":ids"
 }
@@ -487,10 +600,6 @@ func (y *Yaraus) keyClients() string {
 	return y.namespace + ":clients"
 }
 
-func (y *Yaraus) keyMin() string {
-	return y.namespace + ":min"
-}
-
-func (y *Yaraus) keyMax() string {
-	return y.namespace + ":max"
+func (y *Yaraus) keyStats() string {
+	return y.namespace + ":stats"
 }
