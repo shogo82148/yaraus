@@ -109,6 +109,8 @@ type Yaraus struct {
 	scriptGet       *redis.Script
 	scriptExtendTTL *redis.Script
 	scriptRelease   *redis.Script
+	scriptGetTime   string
+	useTimeCommand  bool
 
 	min, max  uint
 	namespace string
@@ -168,12 +170,39 @@ func (y *Yaraus) getClientID() error {
 	return nil
 }
 
+func (y *Yaraus) initGetTimeScript() error {
+	// check it is able to stop scripts replication (from Redis 3.2)
+	ret, err := y.c.Eval(`return redis.replicate_commands ~= nil and 1 or 0`, nil).Result()
+	if err != nil {
+		return err
+	}
+	iret, ok := ret.(int64)
+	if !ok || iret == 0 {
+		return nil
+	}
+
+	// it is Redis 3.2 or over.
+	// use TIME command to get the time.
+	y.scriptGetTime = `
+redis.replicate_commands()
+local t = redis.call("TIME")
+time = t[1] + t[2]*1e-6`
+	y.useTimeCommand = true
+	log.Println("replicate_commands is available")
+
+	return nil
+}
+
 // Init initializes id database.
 // If the initialization is success, it returns true.
 // If the database has already initialized, it returns false.
 func (y *Yaraus) Init() (bool, error) {
 	y.mu.Lock()
 	defer y.mu.Unlock()
+
+	if err := y.initGetTimeScript(); err != nil {
+		return false, err
+	}
 
 	if y.scriptInit == nil {
 		y.scriptInit = redis.NewScript(`
@@ -238,6 +267,7 @@ local max = tonumber(ARGV[2])
 local generator_id = ARGV[3]
 local time = tonumber(ARGV[4])
 local expire = tonumber(ARGV[5])
+` + y.scriptGetTime + `
 
 -- search available id
 redis.call("HINCRBY", key_stats, "` + statsGetIDCount + `", 1)
@@ -303,6 +333,7 @@ local generator_id = ARGV[1]
 local worker_id = ARGV[2]
 local time = tonumber(ARGV[3])
 local expire = tonumber(ARGV[4])
+` + y.scriptGetTime + `
 redis.call("HINCRBY", key_stats, "` + statsExtendTTLCount + `", 1)
 
 -- check ownership
@@ -378,9 +409,11 @@ local key_clients = KEYS[2]
 local yaraus_id = ARGV[1]
 local id = ARGV[2]
 local time = tonumber(ARGV[3])
+` + y.scriptGetTime + `
 
-local owner = redis.call("HGET", key_clients, yaraus_id)
+local owner = redis.call("HGET", key_clients, id)
 if owner == yaraus_id then
+    redis.call("HDEL", key_clients, id)
     redis.call("ZADD", key_ids, time, id)
 end
 
@@ -530,7 +563,7 @@ func (y *Yaraus) Run(ctx context.Context, r Runner) error {
 // Stats returns statistics information.
 func (y *Yaraus) Stats() (Stats, error) {
 	var stats Stats
-	now := time.Now()
+	now := time.Now() // TODO: use TIME command
 	epoch := timeToNumber(now)
 	pipeline := y.c.TxPipeline()
 	retStats := pipeline.HGetAll(y.keyStats())
@@ -606,15 +639,24 @@ func (y *Yaraus) List() ([]ClientInfo, error) {
 	}
 
 	// get info of each ids.
-	now := time.Now()
 	clients := make([]ClientInfo, 0, max-min+1)
 	for i := min; i <= max; i++ {
+		var now time.Time
+		var cmdTime *redis.TimeCmd
 		strID := yarausID(i).String()
 		pipeline := y.c.TxPipeline()
 		retClientID := pipeline.HGet(y.keyClients(), strID)
 		retScore := pipeline.ZScore(y.keyIDs(), strID)
+		if y.useTimeCommand {
+			cmdTime = pipeline.Time()
+		}
 		pipeline.Exec()
 		var clientID string
+		if y.useTimeCommand {
+			now = cmdTime.Val()
+		} else {
+			now = time.Now()
+		}
 		if retClientID.Err() == nil {
 			clientID, _ = retClientID.Result()
 		}
