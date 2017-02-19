@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"fmt"
+
 	redistest "github.com/soh335/go-test-redisserver"
 	"gopkg.in/redis.v5"
 )
@@ -198,4 +200,73 @@ func TestExtendTTLInvaidID(t *testing.T) {
 	if !ok || !err2.InvalidID() {
 		t.Errorf("want invalid id error, got %v", t)
 	}
+}
+
+func TestList(t *testing.T) {
+	s, err := redistest.NewServer(true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Stop()
+
+	now := time.Now()
+	var min, max uint = 1, 1023
+	g := New(&redis.Options{
+		Network: "unix",
+		Addr:    s.Config["unixsocket"],
+	}, "yaraus", min, max)
+	g.Get(10 * time.Second)
+
+	ret, err := g.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ret) != 1 {
+		t.Errorf("want 1, got %d", len(ret))
+	}
+	if ret[0].ClinetID != g.ClientID() {
+		t.Errorf("want %s, got %s", g.ClientID(), ret[0].ClinetID)
+	}
+	if ret[0].ID != g.ID() {
+		t.Errorf("want %d, got %d", g.ID(), ret[0].ID)
+	}
+	d := ret[0].ExpireAt.Sub(now)
+	if 0 < d && d <= 10*time.Second {
+		t.Errorf("got %s", d)
+	}
+}
+
+func benchmarkList(b *testing.B, min, max uint) {
+	s, err := redistest.NewServer(true, nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer s.Stop()
+
+	g := New(&redis.Options{
+		Network: "unix",
+		Addr:    s.Config["unixsocket"],
+	}, "yaraus", min, max)
+	for i := min; i <= max; i++ {
+		g.Get(time.Hour)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		g.List()
+	}
+}
+
+func Benchmark(b *testing.B) {
+	cases := []uint{1, 10, 100, 1000, 10000, 100000}
+	for _, c := range cases {
+		c := c
+		b.Run(
+			fmt.Sprintf("%d", c),
+			func(b *testing.B) {
+				benchmarkList(b, 1, c)
+			},
+		)
+	}
+
 }

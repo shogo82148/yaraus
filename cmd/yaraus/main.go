@@ -29,6 +29,8 @@ func main() {
 		exitCode = commandRun(args)
 	case "stats":
 		exitCode = commandStats(args)
+	case "list":
+		exitCode = commandList(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		usage()
@@ -46,8 +48,9 @@ Usage:
 
 The commands are:
 
-	run
-	stats
+	run     execute commends
+	stats   show id statiscation
+	list    list using id
 `)
 }
 
@@ -117,6 +120,34 @@ func commandStats(args []string) int {
 		return 1
 	}
 	b, err := json.MarshalIndent(s, "", "    ")
+	if err != nil {
+		log.Println(err)
+		return 1
+	}
+	os.Stdout.Write(b)
+
+	return 0
+}
+
+func commandList(args []string) int {
+	var server string
+	flags := flag.NewFlagSet("list", flag.ExitOnError)
+	flags.StringVar(&server, "server", yaraus.DefaultURI, "url for redis")
+	flags.Parse(args[1:])
+
+	opt, ns, err := yaraus.ParseURI(server)
+	if err != nil {
+		log.Println(err)
+		return 1
+	}
+
+	y := yaraus.New(opt, ns, 1, 1)
+	list, err := y.List()
+	if err != nil {
+		log.Println(err)
+		return 1
+	}
+	b, err := json.MarshalIndent(list, "", "    ")
 	if err != nil {
 		log.Println(err)
 		return 1

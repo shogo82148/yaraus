@@ -28,6 +28,13 @@ func numberToTime(s string) time.Time {
 	return t
 }
 
+// float64ToTime float64(unix epoch time) to time.Time
+func float64ToTime(timestamp float64) time.Time {
+	fintSec, fracSec := math.Modf(timestamp)
+	t := time.Unix(int64(fintSec), int64(fracSec*1e9))
+	return t
+}
+
 func durationToNumber(d time.Duration) string {
 	sign := int64(1)
 	if d < 0 {

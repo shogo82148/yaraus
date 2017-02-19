@@ -413,6 +413,47 @@ func (y *Yaraus) Stats() (Stats, error) {
 	return stats, nil
 }
 
+// ClientInfo is information of Yaraus client.
+type ClientInfo struct {
+	ClinetID string
+	ID       uint
+	ExpireAt time.Time
+}
+
+// List lists yaraus's clients
+func (y *Yaraus) List() ([]ClientInfo, error) {
+	// get ids and expire_at
+	now := time.Now()
+	epoch := timeToNumber(now)
+	ret, err := y.c.ZRangeByScoreWithScores(y.keyIDs(), redis.ZRangeBy{Min: epoch, Max: "+inf"}).Result()
+	if err != nil {
+		return nil, err
+	}
+	if len(ret) == 0 {
+		return []ClientInfo{}, nil
+	}
+
+	// convert to []ClientInfo
+	info := make([]ClientInfo, len(ret))
+	ids := make([]string, len(ret))
+	for i, z := range ret {
+		id, err := parseYarausID(z.Member.(string))
+		if err != nil {
+			return nil, err
+		}
+		info[i].ID = uint(id)
+		info[i].ExpireAt = float64ToTime(z.Score)
+		ids[i] = z.Member.(string)
+	}
+
+	// get client ids
+	ret2, err := y.c.HMGet(y.keyClients(), ids...).Result()
+	for i, v := range ret2 {
+		info[i].ClinetID = v.(string)
+	}
+	return info, err
+}
+
 func (y *Yaraus) keyNextID() string {
 	return y.namespace + ":next_id"
 }
