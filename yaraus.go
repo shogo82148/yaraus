@@ -141,6 +141,8 @@ func (y *Yaraus) Get(d time.Duration) error {
 		y.scriptGet = redis.NewScript(`
 local key_ids = KEYS[1]
 local key_clients = KEYS[2]
+local key_min = KEYS[3]
+local key_max = KEYS[4]
 local min = tonumber(ARGV[1])
 local max = tonumber(ARGV[2])
 local generator_id = ARGV[3]
@@ -154,6 +156,8 @@ if redis.call("EXISTS", key_ids) == 0 then
         s = string.char(string.len(s)-1+string.byte('A')) .. s
         redis.call("ZADD", key_ids, 0, s)
     end
+	redis.call("SET", key_min, min)
+	redis.call("SET", key_max, max)
 end
 
 -- search available id
@@ -177,6 +181,8 @@ return {worker_id, tostring(worker_exp)}
 		[]string{
 			y.keyIDs(),
 			y.keyClients(),
+			y.keyMin(),
+			y.keyMax(),
 		},
 		y.min,
 		y.max,
@@ -415,43 +421,58 @@ func (y *Yaraus) Stats() (Stats, error) {
 
 // ClientInfo is information of Yaraus client.
 type ClientInfo struct {
-	ClinetID string
-	ID       uint
-	ExpireAt time.Time
+	ClientID string    `json:"client_id"`
+	ID       uint      `json:"id"`
+	ExpireAt time.Time `json:"expire_at"`
+	Using    bool      `json:"using"`
+	TTL      float64   `json:"ttl"`
 }
 
 // List lists yaraus's clients
 func (y *Yaraus) List() ([]ClientInfo, error) {
-	// get ids and expire_at
-	now := time.Now()
-	epoch := timeToNumber(now)
-	ret, err := y.c.ZRangeByScoreWithScores(y.keyIDs(), redis.ZRangeBy{Min: epoch, Max: "+inf"}).Result()
+	// get min and max fron redis
+	pipeline := y.c.TxPipeline()
+	retMin := pipeline.Get(y.keyMin())
+	retMax := pipeline.Get(y.keyMax())
+	_, err := pipeline.Exec()
 	if err != nil {
 		return nil, err
 	}
-	if len(ret) == 0 {
-		return []ClientInfo{}, nil
+	min, err := retMin.Uint64()
+	if err != nil {
+		return nil, fmt.Errorf("yaraus: invalid min value %v", err)
+	}
+	max, err := retMax.Uint64()
+	if err != nil {
+		return nil, fmt.Errorf("yaraus: invalid max value %v", err)
 	}
 
-	// convert to []ClientInfo
-	info := make([]ClientInfo, len(ret))
-	ids := make([]string, len(ret))
-	for i, z := range ret {
-		id, err := parseYarausID(z.Member.(string))
-		if err != nil {
-			return nil, err
+	// get info of each ids.
+	now := time.Now()
+	clients := make([]ClientInfo, 0, max-min+1)
+	for i := min; i <= max; i++ {
+		strID := yarausID(i).String()
+		pipeline := y.c.TxPipeline()
+		retClientID := pipeline.HGet(y.keyClients(), strID)
+		retScore := pipeline.ZScore(y.keyIDs(), strID)
+		pipeline.Exec()
+		var clientID string
+		if retClientID.Err() == nil {
+			clientID, _ = retClientID.Result()
 		}
-		info[i].ID = uint(id)
-		info[i].ExpireAt = float64ToTime(z.Score)
-		ids[i] = z.Member.(string)
+		expire := float64ToTime(retScore.Val())
+		using := now.Before(expire)
+		ttl := expire.Sub(now).Seconds()
+		clients = append(clients, ClientInfo{
+			ClientID: clientID,
+			ID:       uint(i),
+			ExpireAt: expire,
+			Using:    using,
+			TTL:      ttl,
+		})
 	}
 
-	// get client ids
-	ret2, err := y.c.HMGet(y.keyClients(), ids...).Result()
-	for i, v := range ret2 {
-		info[i].ClinetID = v.(string)
-	}
-	return info, err
+	return clients, nil
 }
 
 func (y *Yaraus) keyNextID() string {
@@ -464,4 +485,12 @@ func (y *Yaraus) keyIDs() string {
 
 func (y *Yaraus) keyClients() string {
 	return y.namespace + ":clients"
+}
+
+func (y *Yaraus) keyMin() string {
+	return y.namespace + ":min"
+}
+
+func (y *Yaraus) keyMax() string {
+	return y.namespace + ":max"
 }

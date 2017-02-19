@@ -221,11 +221,11 @@ func TestList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ret) != 1 {
+	if len(ret) != 1023 {
 		t.Errorf("want 1, got %d", len(ret))
 	}
-	if ret[0].ClinetID != g.ClientID() {
-		t.Errorf("want %s, got %s", g.ClientID(), ret[0].ClinetID)
+	if ret[0].ClientID != g.ClientID() {
+		t.Errorf("want %s, got %s", g.ClientID(), ret[0].ClientID)
 	}
 	if ret[0].ID != g.ID() {
 		t.Errorf("want %d, got %d", g.ID(), ret[0].ID)
@@ -258,7 +258,7 @@ func benchmarkList(b *testing.B, min, max uint) {
 }
 
 func Benchmark(b *testing.B) {
-	cases := []uint{1, 10, 100, 1000, 10000, 100000}
+	cases := []uint{1, 10, 100, 1000, 10000}
 	for _, c := range cases {
 		c := c
 		b.Run(
