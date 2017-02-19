@@ -105,6 +105,7 @@ type Yaraus struct {
 	expireAt time.Time
 	mu       sync.RWMutex
 
+	scriptInit      *redis.Script
 	scriptGet       *redis.Script
 	scriptExtendTTL *redis.Script
 	scriptRelease   *redis.Script
@@ -167,8 +168,58 @@ func (y *Yaraus) getClientID() error {
 	return nil
 }
 
+// Init initializes id database.
+// If the initialization is success, it returns true.
+// If the database has already initialized, it returns false.
+func (y *Yaraus) Init() (bool, error) {
+	y.mu.Lock()
+	defer y.mu.Unlock()
+
+	if y.scriptInit == nil {
+		y.scriptInit = redis.NewScript(`
+local key_ids = KEYS[1]
+local key_clients = KEYS[2]
+local key_stats = KEYS[3]
+local min = tonumber(ARGV[1])
+local max = tonumber(ARGV[2])
+
+if redis.call("EXISTS", key_ids) ~= 0 then
+    return 0 -- already initialized
+end
+
+for i = min, max do
+    local s = string.format("%d", i)
+    s = string.char(string.len(s)-1+string.byte('A')) .. s
+    redis.call("ZADD", key_ids, 0, s)
+end
+redis.call("HMSET", key_stats, "` + statsMin + `", min, "` + statsMax + `", max)
+return 1
+`)
+	}
+
+	ret, err := y.scriptInit.Run(
+		y.c,
+		[]string{
+			y.keyIDs(),
+			y.keyClients(),
+			y.keyStats(),
+		},
+		y.min,
+		y.max,
+	).Result()
+	if err != nil {
+		return false, err
+	}
+	iret, ok := ret.(int64)
+	return ok && iret == 1, nil
+}
+
 // Get gets new id
 func (y *Yaraus) Get(d time.Duration) error {
+	if _, err := y.Init(); err != nil {
+		return err
+	}
+
 	y.mu.Lock()
 	defer y.mu.Unlock()
 
@@ -187,16 +238,6 @@ local max = tonumber(ARGV[2])
 local generator_id = ARGV[3]
 local time = tonumber(ARGV[4])
 local expire = tonumber(ARGV[5])
-
--- initailize
-if redis.call("EXISTS", key_ids) == 0 then
-    for i = min, max do
-        local s = string.format("%d", i)
-        s = string.char(string.len(s)-1+string.byte('A')) .. s
-        redis.call("ZADD", key_ids, 0, s)
-    end
-	redis.call("HMSET", key_stats, "` + statsMin + `", min, "` + statsMax + `", max)
-end
 
 -- search available id
 redis.call("HINCRBY", key_stats, "` + statsGetIDCount + `", 1)
