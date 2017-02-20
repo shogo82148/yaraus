@@ -288,6 +288,7 @@ return {worker_id, tostring(worker_exp)}
 `)
 	}
 
+	now := time.Now()
 	ret, err := y.scriptGet.Run(
 		y.c,
 		[]string{
@@ -298,13 +299,16 @@ return {worker_id, tostring(worker_exp)}
 		y.min,
 		y.max,
 		y.clientID,
-		timeToNumber(time.Now()),
+		timeToNumber(now),
 		durationToNumber(d),
 	).Result()
 	if err != nil {
 		return err
 	}
-	iret := ret.([]interface{})
+	iret, ok := ret.([]interface{})
+	if !ok {
+		return fmt.Errorf("unexpected response %v", ret)
+	}
 	workerID, err := parseYarausID(iret[0].(string))
 	if err != nil {
 		return &Error{
@@ -314,7 +318,7 @@ return {worker_id, tostring(worker_exp)}
 		}
 	}
 	y.id = workerID
-	y.expireAt = numberToTime(iret[1].(string))
+	y.expireAt = now.Add(d)
 
 	return nil
 }
@@ -357,6 +361,7 @@ return {worker_id, tostring(worker_exp)}
 `)
 	}
 
+	now := time.Now()
 	ret, err := y.scriptExtendTTL.Run(
 		y.c,
 		[]string{
@@ -366,7 +371,7 @@ return {worker_id, tostring(worker_exp)}
 		},
 		y.clientID,
 		y.id.String(),
-		timeToNumber(time.Now()),
+		timeToNumber(now),
 		durationToNumber(d),
 	).Result()
 	if err != nil {
@@ -381,7 +386,10 @@ return {worker_id, tostring(worker_exp)}
 			IsInvalidID: invalidID,
 		}
 	}
-	iret := ret.([]interface{})
+	iret, ok := ret.([]interface{})
+	if !ok {
+		return fmt.Errorf("unexpected response %v", ret)
+	}
 	id, err := parseYarausID(iret[0].(string))
 	if err != nil {
 		y.id = id
@@ -392,7 +400,7 @@ return {worker_id, tostring(worker_exp)}
 		}
 	}
 	y.id = id
-	y.expireAt = numberToTime(iret[1].(string))
+	y.expireAt = now.Add(d)
 
 	return nil
 }
@@ -421,6 +429,7 @@ return {id, tostring(time)}
 `)
 	}
 
+	now := time.Now()
 	ret, err := y.scriptRelease.Run(
 		y.c,
 		[]string{
@@ -429,7 +438,7 @@ return {id, tostring(time)}
 		},
 		y.clientID,
 		y.id.String(),
-		timeToNumber(time.Now()),
+		timeToNumber(now),
 	).Result()
 	if err != nil {
 		return &Error{
@@ -449,7 +458,7 @@ return {id, tostring(time)}
 		}
 	}
 	y.id = id
-	y.expireAt = numberToTime(iret[1].(string))
+	y.expireAt = now
 
 	return nil
 }
