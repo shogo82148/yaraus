@@ -184,11 +184,11 @@ func (y *Yaraus) initGetTimeScript() error {
 	// it is Redis 3.2 or over.
 	// use TIME command to get the time.
 	y.scriptGetTime = `
-redis.replicate_commands()
-local t = redis.call("TIME")
-time = t[1] + t[2]*1e-6`
+if redis.replicate_commands() then
+    local t = redis.call("TIME")
+    time = t[1] + t[2]*1e-6
+end`
 	y.useTimeCommand = true
-	log.Println("replicate_commands is available")
 
 	return nil
 }
