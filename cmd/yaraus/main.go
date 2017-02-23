@@ -25,6 +25,8 @@ func main() {
 	var exitCode int
 	cmd := args[0]
 	switch cmd {
+	case "init":
+		exitCode = commandInit(args)
 	case "run":
 		exitCode = commandRun(args)
 	case "stats":
@@ -48,10 +50,37 @@ Usage:
 
 The commands are:
 
+	init    initialize
 	run     execute commends
 	stats   show id statiscation
 	list    list using id
 `)
+}
+
+func commandInit(args []string) int {
+	var server string
+	var min, max uint
+
+	flags := flag.NewFlagSet("run", flag.ExitOnError)
+	flags.StringVar(&server, "server", yaraus.DefaultURI, "url for redis")
+	flags.UintVar(&min, "min", 1, "minimam worker id")
+	flags.UintVar(&max, "max", 1023, "maximam worker id")
+	flags.Parse(args[1:])
+
+	opt, ns, err := yaraus.ParseURI(server)
+	if err != nil {
+		log.Println(err)
+		return 1
+	}
+	y := yaraus.New(opt, ns, min, max)
+	if ok, err := y.Init(); err != nil {
+		log.Println(err)
+	} else if ok {
+		log.Println("initialize success")
+	} else {
+		log.Println("already initialized")
+	}
+	return 0
 }
 
 func commandRun(args []string) int {
@@ -59,7 +88,6 @@ func commandRun(args []string) int {
 	var interval, delay, expire time.Duration
 	var server string
 	var min, max uint
-	var stats bool
 
 	flags := flag.NewFlagSet("run", flag.ExitOnError)
 	flags.StringVar(&replacement, "replacement", "worker-id", "replacement text for worker id")
@@ -70,7 +98,6 @@ func commandRun(args []string) int {
 	flags.BoolVar(&yaraus.DisableSafeguard, "i-am-a-database-removable-specialist", false, "disables safe options")
 	flags.UintVar(&min, "min", 1, "minimam worker id")
 	flags.UintVar(&max, "max", 1023, "maximam worker id")
-	flags.BoolVar(&stats, "stats", false, "show stats")
 	flags.Parse(args[1:])
 
 	opt, ns, err := yaraus.ParseURI(server)

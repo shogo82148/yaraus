@@ -108,6 +108,7 @@ func TestGet(t *testing.T) {
 			Network: "unix",
 			Addr:    s.Config["unixsocket"],
 		}, "yaraus", min, max)
+		g.Init()
 
 		err = g.Get(10 * time.Second)
 		if err != nil {
@@ -143,6 +144,7 @@ func TestExtendTTL(t *testing.T) {
 		Network: "unix",
 		Addr:    s.Config["unixsocket"],
 	}, "yaraus", min, max)
+	g.Init()
 	g.Get(10 * time.Second)
 
 	err = g.ExtendTTL(10 * time.Second)
@@ -162,6 +164,7 @@ func TestExtendTTLError(t *testing.T) {
 		Network: "unix",
 		Addr:    s.Config["unixsocket"],
 	}, "yaraus", min, max)
+	g.Init()
 	g.Get(10 * time.Second)
 
 	s.Stop() // STOP!
@@ -186,6 +189,7 @@ func TestExtendTTLInvaidID(t *testing.T) {
 		Network: "unix",
 		Addr:    s.Config["unixsocket"],
 	}, "yaraus", min, max)
+	g.Init()
 	g.Get(10 * time.Second)
 
 	// I AM A DATABASE REMOVABLE SPECIALIST!!
@@ -215,6 +219,7 @@ func TestList(t *testing.T) {
 		Network: "unix",
 		Addr:    s.Config["unixsocket"],
 	}, "yaraus", min, max)
+	g.Init()
 	g.Get(10 * time.Second)
 
 	ret, err := g.List()
@@ -247,6 +252,7 @@ func benchmarkList(b *testing.B, min, max uint) {
 		Network: "unix",
 		Addr:    s.Config["unixsocket"],
 	}, "yaraus", min, max)
+	g.Init()
 	for i := min; i <= max; i++ {
 		g.Get(time.Hour)
 	}

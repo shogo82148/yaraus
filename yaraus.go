@@ -128,7 +128,7 @@ func New(redisOptions *redis.Options, namespace string, min, max uint) *Yaraus {
 		namespace: namespace,
 		Interval:  1 * time.Second,
 		Delay:     2 * time.Second,
-		Expire:    3 * time.Second,
+		Expire:    time.Hour,
 	}
 }
 
@@ -200,10 +200,6 @@ func (y *Yaraus) Init() (bool, error) {
 	y.mu.Lock()
 	defer y.mu.Unlock()
 
-	if err := y.initGetTimeScript(); err != nil {
-		return false, err
-	}
-
 	if y.scriptInit == nil {
 		y.scriptInit = redis.NewScript(`
 local key_ids = KEYS[1]
@@ -245,12 +241,12 @@ return 1
 
 // Get gets new id
 func (y *Yaraus) Get(d time.Duration) error {
-	if _, err := y.Init(); err != nil {
-		return err
-	}
-
 	y.mu.Lock()
 	defer y.mu.Unlock()
+
+	if err := y.initGetTimeScript(); err != nil {
+		return err
+	}
 
 	err := y.getClientID()
 	if err != nil {
@@ -268,6 +264,11 @@ local generator_id = ARGV[3]
 local time = tonumber(ARGV[4])
 local expire = tonumber(ARGV[5])
 ` + y.scriptGetTime + `
+
+if redis.call("EXISTS", key_ids) == 0 then
+    redis.call("HINCRBY", key_stats, "` + statsGetIDNoAvailableID + `", 1)
+    return {err="no available id. database is not initialized."}
+end
 
 -- search available id
 redis.call("HINCRBY", key_stats, "` + statsGetIDCount + `", 1)
@@ -344,12 +345,15 @@ redis.call("HINCRBY", key_stats, "` + statsExtendTTLCount + `", 1)
 local owner = redis.call("HGET", key_clients, worker_id)
 if owner ~= generator_id then
     redis.call("HINCRBY", key_stats, "` + statsExtendTTLOwnershipError + `", 1)
-    return {err="` + invalidErrorSentinel + `"}
+    return {err="[` + invalidErrorSentinel + `] ownership check error"}
 end
 
 -- check expire
 local score = redis.call("ZSCORE", key_ids, worker_id)
-if score == false or tonumber(score) < time then
+if score == false then
+    return {err="[` + invalidErrorSentinel + `] id has removed"}
+end
+if tonumber(score) < time then
     redis.call("HINCRBY", key_stats, "` + statsExtendTTLExpireWarning + `", 1)
 end
 
@@ -419,11 +423,26 @@ local id = ARGV[2]
 local time = tonumber(ARGV[3])
 ` + y.scriptGetTime + `
 
+-- check ownership
 local owner = redis.call("HGET", key_clients, id)
-if owner == yaraus_id then
-    redis.call("HDEL", key_clients, id)
-    redis.call("ZADD", key_ids, time, id)
+if owner ~= yaraus_id then
+    return {err="ownership check error"}
 end
+
+-- check expire
+local score = redis.call("ZSCORE", key_ids, id)
+if score == false then
+    return {err="id has already removed"}
+end
+if tonumber(score) < time then
+    redis.call("HINCRBY", key_stats, "` + statsExtendTTLExpireWarning + `", 1)
+end
+
+-- release ownership
+redis.call("HDEL", key_clients, id)
+
+-- set id expored
+redis.call("ZADD", key_ids, time, id)
 
 return {id, tostring(time)}
 `)
