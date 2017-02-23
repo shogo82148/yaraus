@@ -206,6 +206,41 @@ func TestExtendTTLInvaidID(t *testing.T) {
 	}
 }
 
+func benchmarkExtendTTL(b *testing.B, min, max uint) {
+	s, err := redistest.NewServer(true, nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer s.Stop()
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		g := New(&redis.Options{
+			Network: "unix",
+			Addr:    s.Config["unixsocket"],
+		}, "yaraus", min, max)
+		g.Init()
+		g.Get(time.Hour)
+		for pb.Next() {
+			g.ExtendTTL(time.Hour)
+		}
+	})
+
+}
+
+func BenchmarkExtendTTL(b *testing.B) {
+	cases := []uint{1, 10, 100, 1000, 10000}
+	for _, c := range cases {
+		c := c
+		b.Run(
+			fmt.Sprintf("%d", c),
+			func(b *testing.B) {
+				benchmarkExtendTTL(b, 1, c)
+			},
+		)
+	}
+}
+
 func TestList(t *testing.T) {
 	s, err := redistest.NewServer(true, nil)
 	if err != nil {
@@ -263,7 +298,7 @@ func benchmarkList(b *testing.B, min, max uint) {
 	}
 }
 
-func Benchmark(b *testing.B) {
+func BenchmarkList(b *testing.B) {
 	cases := []uint{1, 10, 100, 1000, 10000}
 	for _, c := range cases {
 		c := c
@@ -274,5 +309,4 @@ func Benchmark(b *testing.B) {
 			},
 		)
 	}
-
 }
