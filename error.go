@@ -1,15 +1,19 @@
 package yaraus
 
+import (
+	"fmt"
+)
+
 // Error is yaraus error.
 type Error struct {
-	Err         string
+	Err         error
 	ClientID    string
 	ID          uint
 	IsInvalidID bool
 }
 
 func (err *Error) Error() string {
-	return err.Err
+	return fmt.Sprintf("yaraus: %s", err.Err.Error())
 }
 
 // InvalidID returns err.ID is invalid.

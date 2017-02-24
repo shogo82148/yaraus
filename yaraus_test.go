@@ -203,8 +203,6 @@ func TestSlaveCount(t *testing.T) {
 	g.Interval = time.Second
 	if err := g.wait(1); err == nil {
 		t.Error("want err, got nil")
-	} else {
-		t.Log(err)
 	}
 	if d := time.Since(start); d < 900*time.Millisecond || d > 1100*time.Millisecond {
 		t.Errorf("want to block in 1s, blocks in %s", d)

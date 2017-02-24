@@ -269,7 +269,7 @@ func (y *Yaraus) wait(id uint) *Error {
 	sc, err := slaveCount(y.c)
 	if err != nil {
 		return &Error{
-			Err:      err.Error(),
+			Err:      err,
 			ID:       id,
 			ClientID: y.clientID,
 		}
@@ -282,14 +282,14 @@ func (y *Yaraus) wait(id uint) *Error {
 	i, err := y.c.Wait(sc/2+1, y.Interval).Result()
 	if err != nil {
 		return &Error{
-			Err:      err.Error(),
+			Err:      err,
 			ID:       id,
 			ClientID: y.clientID,
 		}
 	}
 	if int(i) < sc/2+1 {
 		return &Error{
-			Err:      fmt.Sprintf("yaraus: failed to sync, got %d, want %d", int(i), sc/2+1),
+			Err:      fmt.Errorf("failed to sync, got %d, want %d", int(i), sc/2+1),
 			ID:       id,
 			ClientID: y.clientID,
 		}
@@ -372,7 +372,7 @@ return {worker_id, tostring(worker_exp)}
 	workerID, err := parseYarausID(iret[0].(string))
 	if err != nil {
 		return &Error{
-			Err:         err.Error(),
+			Err:         err,
 			ClientID:    y.clientID,
 			IsInvalidID: true,
 		}
@@ -448,7 +448,7 @@ return {worker_id, tostring(worker_exp)}
 			y.id = 0
 		}
 		return &Error{
-			Err:         err.Error(),
+			Err:         err,
 			ClientID:    y.clientID,
 			ID:          uint(y.id),
 			IsInvalidID: invalidID,
@@ -462,7 +462,7 @@ return {worker_id, tostring(worker_exp)}
 	if err != nil {
 		y.id = id
 		return &Error{
-			Err:         err.Error(),
+			Err:         err,
 			ClientID:    y.clientID,
 			IsInvalidID: true,
 		}
@@ -534,7 +534,7 @@ return {id, tostring(time)}
 	).Result()
 	if err != nil {
 		return &Error{
-			Err:         err.Error(),
+			Err:         err,
 			ClientID:    y.clientID,
 			ID:          uint(y.id),
 			IsInvalidID: strings.Index(err.Error(), invalidErrorSentinel) >= 0,
@@ -544,7 +544,7 @@ return {id, tostring(time)}
 	id, err := parseYarausID(iret[0].(string))
 	if err != nil {
 		return &Error{
-			Err:         err.Error(),
+			Err:         err,
 			ClientID:    y.clientID,
 			IsInvalidID: true,
 		}
