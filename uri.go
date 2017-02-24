@@ -37,7 +37,8 @@ func ParseURI(s string) (*redis.Options, string, error) {
 		port = "6379"
 	}
 	opt := &redis.Options{
-		Addr: net.JoinHostPort(hostname, port),
+		Addr:     net.JoinHostPort(hostname, port),
+		PoolSize: 1, // we must send all commands in same connection
 	}
 
 	p := path.Clean(u.Path)

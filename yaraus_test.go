@@ -1,10 +1,10 @@
 package yaraus
 
 import (
+	"fmt"
+	"net"
 	"testing"
 	"time"
-
-	"fmt"
 
 	redistest "github.com/soh335/go-test-redisserver"
 	"gopkg.in/redis.v5"
@@ -66,6 +66,144 @@ func TestID_error(t *testing.T) {
 		if err == nil {
 			t.Errorf("parseYarausID(%s) want error, got nil", s)
 		}
+	}
+}
+
+func emptyPort() (string, error) {
+	listner, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", err
+	}
+	defer listner.Close()
+	_, port, err := net.SplitHostPort(listner.Addr().String())
+	if err != nil {
+		return "", err
+	}
+	return port, nil
+}
+
+func TestSlaveCount(t *testing.T) {
+	// start server
+	port1, err := emptyPort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s1, err := redistest.NewServer(true, redistest.Config{
+		"port": port1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s1.Stop()
+
+	// check slaveCount, it should be 0. there in no slave.
+	c1 := redis.NewClient(&redis.Options{
+		Addr:     net.JoinHostPort("localhost", port1),
+		PoolSize: 1,
+	})
+	count, err := slaveCount(c1)
+	if err != nil {
+		t.Error(err)
+	}
+	if count != 0 {
+		t.Errorf("want 0, got %d", count)
+	}
+
+	// wait method does not block
+	g := New(&redis.Options{
+		Addr:     net.JoinHostPort("localhost", port1),
+		PoolSize: 1,
+	}, "yaraus", 1, 1)
+	if err = g.c.Set("yaraus:foo", "foo", 0).Err(); err != nil {
+		t.Error(err)
+	}
+	start := time.Now()
+	if err := g.wait(1); err != nil {
+		t.Error(err)
+	}
+	if d := time.Since(start); d > 100*time.Millisecond {
+		t.Errorf("want not to block, blocks in %s", d)
+	}
+
+	// add slave
+	port2, err := emptyPort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := redistest.NewServer(true, redistest.Config{
+		"port": port2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Stop()
+	c2 := redis.NewClient(&redis.Options{
+		Addr:     net.JoinHostPort("localhost", port2),
+		PoolSize: 1,
+	})
+	if err := c2.SlaveOf("localhost", port1).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// check slaveCount has changed.
+	var lastc int
+	for i := 0; i < 5; i++ {
+		time.Sleep(time.Second)
+		c, err := slaveCount(c1)
+		if err != nil {
+			t.Error(err)
+		}
+		lastc = c
+		if c == 1 {
+			break
+		}
+	}
+	if lastc != 1 {
+		t.Errorf("want 1, got %d", lastc)
+	}
+
+	// test wait success
+	start = time.Now()
+	go func() {
+		// slave is sleeping now...
+		sleep := redis.NewStatusCmd("DEBUG", "SLEEP", 1)
+		c2.Process(sleep)
+		if err := sleep.Err(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err = g.c.Set("yaraus:bar", "bar", 0).Err(); err != nil {
+		t.Error(err)
+	}
+	g.Interval = 2 * time.Second
+	if err := g.wait(1); err != nil {
+		t.Error(err)
+	}
+	if d := time.Since(start); d < 900*time.Millisecond || d > 1100*time.Millisecond {
+		t.Errorf("want to block in 1s, blocks in %s", d)
+	}
+
+	// test wait timeout
+	start = time.Now()
+	go func() {
+		// slave is sleeping now...
+		sleep := redis.NewStatusCmd("DEBUG", "SLEEP", 3)
+		c2.Process(sleep)
+		if err := sleep.Err(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err = g.c.Set("yaraus:bar", "bar", 0).Err(); err != nil {
+		t.Error(err)
+	}
+	g.Interval = 2 * time.Second
+	if err := g.wait(1); err == nil {
+		t.Error("want err, got nil")
+	} else {
+		t.Log(err)
+	}
+	if d := time.Since(start); d < 1900*time.Millisecond || d > 2100*time.Millisecond {
+		t.Errorf("want to block in 1s, blocks in %s", d)
 	}
 }
 

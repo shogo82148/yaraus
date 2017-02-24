@@ -239,6 +239,65 @@ return 1
 	return ok && iret == 1, nil
 }
 
+func slaveCount(client *redis.Client) (int, error) {
+	cmd := redis.NewSliceCmd("ROLE")
+	client.Process(cmd)
+	v, err := cmd.Result()
+	if err != nil {
+		return 0, err
+	}
+	if len(v) < 3 {
+		return 0, errors.New("yaraus: role format error")
+	}
+	role, ok := v[0].(string)
+	if !ok {
+		return 0, errors.New("yaraus: role format error")
+	}
+	if role != "master" {
+		return 0, fmt.Errorf("yaraus: invalid role: %s", role)
+	}
+	slaves, ok := v[2].([]interface{})
+	if !ok {
+		return 0, errors.New("yaraus: role format error")
+	}
+	return len(slaves), nil
+}
+
+// wait waits slaves of redis
+func (y *Yaraus) wait(id uint) *Error {
+	// get slaves count
+	sc, err := slaveCount(y.c)
+	if err != nil {
+		return &Error{
+			Err:      err.Error(),
+			ID:       id,
+			ClientID: y.clientID,
+		}
+	}
+	if sc == 0 {
+		return nil
+	}
+
+	// wait for redis slaves.
+	i, err := y.c.Wait(sc/2+1, y.Interval).Result()
+	if err != nil {
+		return &Error{
+			Err:      err.Error(),
+			ID:       id,
+			ClientID: y.clientID,
+		}
+	}
+	if int(i) < sc/2+1 {
+		return &Error{
+			Err:      fmt.Sprintf("yaraus: failed to sync, got %d, want %d", int(i), sc/2+1),
+			ID:       id,
+			ClientID: y.clientID,
+		}
+	}
+
+	return nil
+}
+
 // Get gets new id
 func (y *Yaraus) Get(d time.Duration) error {
 	y.mu.Lock()
@@ -320,6 +379,11 @@ return {worker_id, tostring(worker_exp)}
 	}
 	y.id = workerID
 	y.expireAt = now.Add(d)
+
+	if err := y.wait(uint(workerID)); err != nil {
+		y.release()
+		err.IsInvalidID = true
+	}
 
 	return nil
 }
@@ -403,6 +467,11 @@ return {worker_id, tostring(worker_exp)}
 			IsInvalidID: true,
 		}
 	}
+
+	if err := y.wait(uint(id)); err != nil {
+		return err
+	}
+
 	y.id = id
 	y.expireAt = now.Add(d)
 
@@ -413,7 +482,11 @@ return {worker_id, tostring(worker_exp)}
 func (y *Yaraus) Release() error {
 	y.mu.Lock()
 	defer y.mu.Unlock()
+	return y.release()
+}
 
+// Release releases worker id.
+func (y *Yaraus) release() error {
 	if y.scriptRelease == nil {
 		y.scriptRelease = redis.NewScript(`
 local key_ids = KEYS[1]
