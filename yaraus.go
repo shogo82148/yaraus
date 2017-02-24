@@ -588,7 +588,13 @@ func (y *Yaraus) Run(ctx context.Context, r Runner) error {
 			break
 		}
 		log.Printf("error: %v", err)
-		time.Sleep(y.Interval)
+		timer := time.NewTimer(y.Interval)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		}
 	}
 	defer func() {
 		log.Println("releasing id...")
@@ -654,7 +660,13 @@ func (y *Yaraus) Run(ctx context.Context, r Runner) error {
 	d := y.Delay
 	if d > 0 {
 		log.Printf("sleep %s for making sure that other generates which has same id expire.", d)
-		time.Sleep(d)
+		timer := time.NewTimer(d)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		}
 	}
 
 	log.Println("starting...")
