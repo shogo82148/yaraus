@@ -3,6 +3,7 @@ package yaraus
 import (
 	"fmt"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -185,26 +186,30 @@ func TestSlaveCount(t *testing.T) {
 
 	// test wait timeout
 	start = time.Now()
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
 		// slave is sleeping now...
-		sleep := redis.NewStatusCmd("DEBUG", "SLEEP", 3)
+		sleep := redis.NewStatusCmd("DEBUG", "SLEEP", 2)
 		c2.Process(sleep)
 		if err := sleep.Err(); err != nil {
 			t.Error(err)
 		}
+		wg.Done()
 	}()
 	if err = g.c.Set("yaraus:bar", "bar", 0).Err(); err != nil {
 		t.Error(err)
 	}
-	g.Interval = 2 * time.Second
+	g.Interval = time.Second
 	if err := g.wait(1); err == nil {
 		t.Error("want err, got nil")
 	} else {
 		t.Log(err)
 	}
-	if d := time.Since(start); d < 1900*time.Millisecond || d > 2100*time.Millisecond {
+	if d := time.Since(start); d < 900*time.Millisecond || d > 1100*time.Millisecond {
 		t.Errorf("want to block in 1s, blocks in %s", d)
 	}
+	wg.Wait()
 }
 
 func TestGetClientID(t *testing.T) {
