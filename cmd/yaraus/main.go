@@ -93,7 +93,7 @@ func commandRun(args []string) int {
 	flags.StringVar(&replacement, "replacement", "{}", "replacement text for worker id")
 	flags.DurationVar(&interval, "interval", time.Second, "interval duration time")
 	flags.DurationVar(&delay, "delay", 2*time.Second, "delay duration time for get id and use it")
-	flags.DurationVar(&expire, "expire", 3*time.Second, "expire duration time")
+	flags.DurationVar(&expire, "expire", 30*time.Minute, "expire duration time")
 	flags.StringVar(&server, "server", yaraus.DefaultURI, "url for redis")
 	flags.BoolVar(&yaraus.DisableSafeguard, "i-am-a-database-removable-specialist", false, "disables safe options")
 	flags.UintVar(&min, "min", 1, "minimam worker id")

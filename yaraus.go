@@ -128,7 +128,7 @@ func New(redisOptions *redis.Options, namespace string, min, max uint) *Yaraus {
 		namespace: namespace,
 		Interval:  1 * time.Second,
 		Delay:     2 * time.Second,
-		Expire:    time.Hour,
+		Expire:    30 * time.Minute,
 	}
 }
 
