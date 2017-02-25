@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
@@ -47,12 +48,9 @@ func NewCommandRunner(replacement string, cmd []string) Runner {
 // Run executes the command.
 func (r *CommandRunner) Run(ctx context.Context, id uint) error {
 	args := make([]string, len(r.cmd)-1)
+	sid := fmt.Sprintf("%d", id)
 	for i, arg := range r.cmd[1:] {
-		if arg == r.replacement {
-			args[i] = fmt.Sprintf("%d", id)
-		} else {
-			args[i] = arg
-		}
+		args[i] = strings.Replace(arg, r.replacement, sid, -1)
 	}
 	cmd := exec.CommandContext(ctx, r.cmd[0], args...)
 	cmd.Stdin = os.Stdin

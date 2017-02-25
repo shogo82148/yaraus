@@ -90,7 +90,7 @@ func commandRun(args []string) int {
 	var min, max uint
 
 	flags := flag.NewFlagSet("run", flag.ExitOnError)
-	flags.StringVar(&replacement, "replacement", "worker-id", "replacement text for worker id")
+	flags.StringVar(&replacement, "replacement", "{}", "replacement text for worker id")
 	flags.DurationVar(&interval, "interval", time.Second, "interval duration time")
 	flags.DurationVar(&delay, "delay", 2*time.Second, "delay duration time for get id and use it")
 	flags.DurationVar(&expire, "expire", 3*time.Second, "expire duration time")
