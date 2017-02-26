@@ -118,6 +118,10 @@ func TestSlaveCount(t *testing.T) {
 	if err = g.c.Set("yaraus:foo", "foo", 0).Err(); err != nil {
 		t.Error(err)
 	}
+	g.checkWaitCommand()
+	if !g.useWait {
+		t.SkipNow()
+	}
 	start := time.Now()
 	if err := g.wait(1); err != nil {
 		t.Error(err)

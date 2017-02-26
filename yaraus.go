@@ -111,6 +111,7 @@ type Yaraus struct {
 	scriptRelease   *redis.Script
 	scriptGetTime   string
 	useTimeCommand  bool
+	useWait         bool
 
 	min, max  uint
 	namespace string
@@ -178,6 +179,7 @@ func (y *Yaraus) initGetTimeScript() error {
 	}
 	iret, ok := ret.(int64)
 	if !ok || iret == 0 {
+		log.Println("WARNING: your redis not support redis.replicate_commands")
 		return nil
 	}
 
@@ -239,6 +241,19 @@ return 1
 	return ok && iret == 1, nil
 }
 
+func (y *Yaraus) checkWaitCommand() error {
+	_, err := y.c.Wait(0, 0).Result()
+	if err == nil {
+		y.useWait = true
+		return nil
+	}
+	if strings.Index(strings.ToLower(err.Error()), "unknown command") >= 0 {
+		log.Println("WARNING: your redis not support WAIT command")
+		return nil
+	}
+	return err
+}
+
 func slaveCount(client *redis.Client) (int, error) {
 	cmd := redis.NewSliceCmd("ROLE")
 	client.Process(cmd)
@@ -265,6 +280,10 @@ func slaveCount(client *redis.Client) (int, error) {
 
 // wait waits slaves of redis
 func (y *Yaraus) wait(id uint) *Error {
+	if !y.useWait {
+		return nil
+	}
+
 	// get slaves count
 	sc, err := slaveCount(y.c)
 	if err != nil {
@@ -304,6 +323,9 @@ func (y *Yaraus) Get(d time.Duration) error {
 	defer y.mu.Unlock()
 
 	if err := y.initGetTimeScript(); err != nil {
+		return err
+	}
+	if err := y.checkWaitCommand(); err != nil {
 		return err
 	}
 
